@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# usage: bin/compile BUILD_DIR CACHE_DIR ENV_DIR
+
+set -e -o pipefail
+
+# sed -l basically makes sed replace and buffer through stdin to
+# stdout so you get updates while the command runs and don't wait for
+# the end.
+# e.g. npm install | indent
+# lifted from: https://github.com/heroku/heroku-buildpack-jvm-common
+indent() {
+  # if an arg is given it's a flag indicating we shouldn't indent the
+  # first line, so use :+ to tell SED accordingly if that parameter is
+  # set, otherwise null string for no range selector prefix (it
+  # selects from line 2 onwards and then every 1st line, meaning all
+  # lines)
+  c="${1:+"2,999"} s/^/       /"
+  case $(uname) in
+    Darwin) sed -l "$c";; # mac/bsd sed: -l buffers on line boundaries
+    *)      sed -u "$c";; # unix/gnu sed: -u unbuffered (arbitrary) chunks of data
+  esac
+}
+
+mkdir -p "$1" "$2"
+build=$(cd "$1/" && pwd)
+cache=$(cd "$2/" && pwd)
+env_dir="$3"
+
+# Load common JVM functionality from https://github.com/heroku/heroku-buildpack-jvm-common
+JVM_COMMON_BUILDPACK="https://codon-buildpacks.s3.amazonaws.com/buildpacks/heroku/jvm-common.tgz"
+mkdir -p /tmp/jvm-common
+curl --silent --location $JVM_COMMON_BUILDPACK | tar xzm -C /tmp/jvm-common --strip-components=1
+. /tmp/jvm-common/bin/util
+. /tmp/jvm-common/bin/java
+
+# Install JDK
+javaVersion=$(detect_java_version ${build})
+echo -n "-----> Installing OpenJDK ${javaVersion}..."
+install_java ${build} ${javaVersion}
+jdk_overlay ${build}
+echo "done"
+
+if [[ -d "$env_dir" ]]; then
+    # load the buildpack config vars
+    for key in CLJ_BUILD_CMD; do
+        if [[ -f "$env_dir/$key" ]]; then
+            export "$key=$(cat "$env_dir/$key")"
+        fi
+    done
+fi
+
+#cached_m2_dir="$cache/.m2"
+#cached_boot_home_dir="$cache/.boot"
+
+if [[ -d "$cache/clojure-cli" ]]; then
+    echo "-----> Using cached version of clojure-cli"
+    #if [[ -f "$cached_boot_home_dir/boot.properties" ]]; then
+    #  cat "$cached_boot_home_dir/boot.properties" | indent
+    #fi
+else
+    download_url="https://download.clojure.org/install/linux-install-1.9.0.358.sh"
+    echo "-----> Downloading $download_url ..."
+    curl -O $download_url
+    echo "Download complete" | indent
+
+    echo "-----> Installing..."
+    chmod +x linux-install-1.9.0.358.sh
+    mkdir $cache/clojure-cli
+    ./linux-install-1.9.0.358.sh --prefix $cache/clojure-cli
+
+    echo "-----> Done installing..."
+fi
+
+clj_build_cmd=${CLJ_BUILD_CMD}
+echo "-----> Running: $clj_build_cmd"
+(
+  export PATH="$cache/clojure-cli/bin:$PATH"
+  cd $build
+  $clj_build_cmd 2>&1 | indent
+  echo ""
+)
+
+# TODO: do we need to copy?
+# echo -n "-----> Copying maven artifacts..."
+# rm -rf "$cached_boot_home_dir/cache/cache" "$cached_boot_home_dir/cache/tmp"
+# cp -R "$cached_m2_dir" "$build/.m2"
+# cp -R "$cached_boot_home_dir" "$build/.boot"
+# echo " done"
+
+# unpack existing cache
+# CACHED_DIRS=".m2 node_modules"
+# for DIR in $CACHED_DIRS; do
+#   if [ ! -d $BUILD_DIR/$DIR ]; then
+#     cache_copy $DIR $CACHE_DIR $BUILD_DIR
+#   fi
+# done
+
+
+# mkdir -p "$build/.profile.d"
+# cat << EOF > "$build/.profile.d/boot-env.sh"
+# export PATH="\$HOME/.bootbin:\$PATH"
+# export BOOT_VERSION=$BOOT_VERSION
+# EOF
