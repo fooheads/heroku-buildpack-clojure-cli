@@ -42,7 +42,7 @@ echo "done"
 
 if [[ -d "$env_dir" ]]; then
     # load the buildpack config vars
-    for key in CLJ_BUILD_CMD; do
+    for key in CLOJURE_BUILD_CMD; do
         if [[ -f "$env_dir/$key" ]]; then
             export "$key=$(cat "$env_dir/$key")"
         fi
@@ -60,23 +60,25 @@ if [[ -d "$cache/clojure-cli" ]]; then
 else
     download_url="https://download.clojure.org/install/linux-install-1.9.0.358.sh"
     echo "-----> Downloading $download_url ..."
-    curl -O $download_url
+    curl -O $download_url 2>&1 | indent
     echo "Download complete" | indent
 
     echo "-----> Installing..."
     chmod +x linux-install-1.9.0.358.sh
     mkdir $cache/clojure-cli
-    ./linux-install-1.9.0.358.sh --prefix $cache/clojure-cli
+    ./linux-install-1.9.0.358.sh --prefix $cache/clojure-cli 2>&1 | indent
 
     echo "-----> Done installing..."
 fi
 
-clj_build_cmd=${CLJ_BUILD_CMD}
-echo "-----> Running: $clj_build_cmd"
+clojure_build_cmd=${CLOJURE_BUILD_CMD}
+echo "-----> Running: $clojure_build_cmd"
 (
   export PATH="$cache/clojure-cli/bin:$PATH"
   cd $build
-  $clj_build_cmd 2>&1 | indent
+  echo "Using CLOJURE_BUILD_CMD '${clojure_build_cmd}'"
+  find $cache/clojure-cli/bin
+  $clojure_build_cmd 2>&1 | indent
   echo ""
 )
 
